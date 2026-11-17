@@ -1,27 +1,35 @@
-name: validate
+name: on-pr
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [main]
+    types: [opened, reopened, synchronize, labeled]
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
-  validate:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-    - uses: actions/checkout@v6
-    - uses: upbound/action-up@v1.0.0
-      with:
-        skip-login: true
-    - uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-    - run: pip install PyYAML==6.0.3
-    - run: make test
-      env:
-        CLOUDFLARE_WORKER_VALIDATE_RELAY: 'true'
-    - run: make build
+  checks:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/check.yaml
+
+  e2e:
+    if: github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'cloudflare-e2e')
+    needs: checks
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/cloudflare-e2e.yaml
+
+  publish:
+    if: >-
+      ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.checks.result == 'success' && (needs.e2e.result == 'success' || needs.e2e.result == 'skipped') }}
+    needs: [checks, e2e]
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+      issues: write
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/publish.yaml@v2.20.0
+    with:
+      tag: pr-${{ github.event.pull_request.number }}-${{ github.sha }}

@@ -4,3 +4,5 @@ _output/
 .tmp/
 **/aws-creds
 tests/**/secrets/
+
+__pycache__/

@@ -85,3 +85,31 @@ Run `make render` for the example renders and `make test` for lifecycle
 contracts. The latter needs Python with PyYAML. Set
 `CLOUDFLARE_WORKER_SCHEMAS` to a directory of the installed provider,
 WebService, and Usage CRDs to validate the rendered resources against them.
+
+## Release and live CI
+
+Pull requests build and test the package. Same-repository pull requests labeled
+`cloudflare-e2e` also run the Kind lifecycle test. Main runs the lifecycle test
+before vnext creates a release tag. The tagged workflow publishes the package
+and GitHub release.
+
+Configure the repository's `cloudflare-e2e` GitHub Actions environment:
+
+| Setting | Kind | Value |
+| --- | --- | --- |
+| `CLOUDFLARE_TEST_API_TOKEN` | Secret | API token restricted to a dedicated test Cloudflare account with a Workers write permission |
+| `CLOUDFLARE_TEST_ACCOUNT_ID` | Variable | That test account's ID |
+| `CLOUDFLARE_TEST_WORKERS_SUBDOMAIN` | Variable | The account label in `<label>.workers.dev`, enabled in Cloudflare |
+| `CLOUDFLARE_WORKERS_PROVIDER_PACKAGE` | Variable | Pullable Crossplane provider package that serves namespaced `Script.spec.artifact` |
+| `CLOUDFLARE_FAMILY_PROVIDER_PACKAGE` | Variable, optional | Explicit compatible family package if the Workers package needs a separately installed family |
+
+Grant the token permission to create, update, read, and delete Worker scripts
+and manage their `workers.dev` endpoint. The workflow uses the repository's
+automatic Actions token to publish and pull its synthetic OCI bundles.
+
+The test boots a fresh Kind cluster, installs Crossplane and the compatible
+provider, and reconciles the source composition with its go-templating renderer.
+It publishes two versions of a synthetic response Worker under a run-specific
+name, checks the live Cloudflare response before and after updating the digest,
+and confirms Cloudflare deletion. The workflow tests the public Worker
+lifecycle. The render tests cover the private relay and private origin bindings.

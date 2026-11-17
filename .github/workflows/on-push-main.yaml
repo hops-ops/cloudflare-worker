@@ -1,0 +1,29 @@
+name: on-push-main
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  checks:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/check.yaml
+
+  e2e:
+    needs: checks
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/cloudflare-e2e.yaml
+
+  version-and-tag:
+    needs: [checks, e2e]
+    permissions:
+      contents: write
+    uses: unbounded-tech/workflow-vnext-tag/.github/workflows/workflow.yaml@v1.21.3
+    with:
+      useDeployKey: true
+    secrets:
+      DEPLOY_KEY: ${{ secrets.DEPLOY_KEY }}
