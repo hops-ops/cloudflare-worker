@@ -1,0 +1,64 @@
+{{- if and $platform (eq $mode "private") }}
+{{- $relayProfile := $platform.relay | default dict }}
+{{- if empty $relayProfile.image }}
+{{- fail "private exposure requires the platform relay.image (a Caddy image)" }}
+{{- end }}
+{{- $relay := get $state.observed "relay" | default dict }}
+{{- $subdomain := get $state.observed "endpoint" | default dict }}
+{{- if or $relay (dig "metadata" "annotations" "crossplane.io/external-name" "" $subdomain) }}
+---
+apiVersion: workloads.hops.ops.com.ai/v1alpha1
+kind: WebService
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  annotations:
+    {{ setResourceNameAnnotation "relay" }}
+  labels: {{ $labels | toJson }}
+spec:
+  exposure: private
+  image: {{ $relayProfile.image | quote }}
+  platformRef:
+    name: {{ $relayProfile.webServiceProfile | default "default" | quote }}
+  port: 8080
+  command: ["/bin/sh", "-ec"]
+  args:
+  - |
+    printf '%s\n' "$RELAY_CONFIG" > /tmp/Caddyfile
+    exec caddy run --config /tmp/Caddyfile --adapter caddyfile
+  env:
+  - name: RELAY_CONFIG
+    value: |
+      {
+          admin off
+          auto_https off
+      }
+      :8080 {
+          respond /__relay/health 200
+          reverse_proxy https://{{ $edge }} {
+              header_up Host {upstream_hostport}
+              header_up -Cf-Access-Jwt-Assertion
+              header_up Cookie "(?i)(^|;[ ]*)CF_Authorization=[^;]*" "$1"
+              header_up CF-Access-Client-Id {env.CF_ACCESS_CLIENT_ID}
+              header_up CF-Access-Client-Secret {env.CF_ACCESS_CLIENT_SECRET}
+              header_down -Cf-Access-Jwt-Assertion
+              header_down Set-Cookie "(?i)^CF_Authorization=.*$" ""
+          }
+      }
+  - name: CF_ACCESS_CLIENT_ID
+    valueFrom:
+      secretKeyRef: {name: {{ $tokenSecret }}, key: client_id}
+  - name: CF_ACCESS_CLIENT_SECRET
+    valueFrom:
+      secretKeyRef: {name: {{ $tokenSecret }}, key: client_secret}
+  podTemplate:
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65532
+      runAsGroup: 65532
+      seccompProfile: {type: RuntimeDefault}
+  probes:
+    readiness:
+      httpGet: {path: /__relay/health, port: 8080}
+{{- end }}
+{{- end }}

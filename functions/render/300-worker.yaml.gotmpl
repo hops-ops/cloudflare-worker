@@ -1,0 +1,56 @@
+{{- if $platform }}
+---
+apiVersion: workers.upjet-cloudflare.m.upbound.io/v1alpha1
+kind: Script
+metadata:
+  name: {{ $name }}
+  namespace: {{ $ns }}
+  annotations:
+    {{ setResourceNameAnnotation "worker" }}
+  labels: {{ $labels | toJson }}
+spec:
+  managementPolicies: {{ $policies | toJson }}
+  providerConfigRef: {{ $platform.providerConfigRef | toJson }}
+  artifact: {{ $spec.artifact | toJson }}
+  forProvider:
+    accountId: {{ $platform.accountId | quote }}
+    {{- if eq $mode "private" }}
+    accessApplicationRef:
+      name: {{ $access }}
+      policy: {resolve: Always}
+    {{- else }}
+    scriptName: {{ $spec.workerName }}
+    {{- end }}
+    compatibilityDate: {{ $spec.compatibilityDate | quote }}
+    {{- if $spec.compatibilityFlags }}
+    compatibilityFlags: {{ $spec.compatibilityFlags | toJson }}
+    {{- end }}
+    {{- if $bindings }}
+    bindings: {{ $bindings | toJson }}
+    {{- end }}
+{{- if (or (dig "metadata" "annotations" "crossplane.io/external-name" "" $worker) (hasKey $state.observed "endpoint")) }}
+---
+apiVersion: workers.upjet-cloudflare.m.upbound.io/v1alpha1
+kind: ScriptSubdomain
+metadata:
+  name: {{ $endpoint }}
+  namespace: {{ $ns }}
+  annotations:
+    {{ setResourceNameAnnotation "endpoint" }}
+  labels: {{ $labels | toJson }}
+spec:
+  managementPolicies: {{ $policies | toJson }}
+  providerConfigRef: {{ $platform.providerConfigRef | toJson }}
+  forProvider:
+    accountId: {{ $platform.accountId | quote }}
+    {{- if eq $mode "private" }}
+    accessApplicationRef:
+      name: {{ $access }}
+      policy: {resolve: Always}
+    {{- else }}
+    scriptName: {{ $spec.workerName }}
+    {{- end }}
+    enabled: {{ ne $mode "none" }}
+    previewsEnabled: false
+{{- end }}
+{{- end }}

@@ -1,0 +1,14 @@
+{{- $digest := dig "status" "resolvedArtifactDigest" "" $worker }}
+{{- if $digest }}
+{{- $_ := set $state.status "resolvedArtifactDigest" $digest }}
+{{- end }}
+{{- if eq $mode "private" }}
+{{- $url := dig "status" "url" "" (get $state.observed "relay" | default dict) }}
+{{- if $url }}{{- $_ := set $state.status "url" $url }}{{- end }}
+{{- else if and (eq $mode "public") $edge (dig "status" "atProvider" "enabled" false (get $state.observed "endpoint" | default dict)) }}
+{{- $_ := set $state.status "url" (printf "https://%s" $edge) }}
+{{- end }}
+---
+apiVersion: workloads.hops.ops.com.ai/v1alpha1
+kind: CloudflareWorker
+status: {{ $state.status | toJson }}

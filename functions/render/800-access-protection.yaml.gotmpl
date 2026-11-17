@@ -1,0 +1,31 @@
+{{- if and $platform (eq $mode "private") }}
+{{- $groups := dict "workers" "workers.upjet-cloudflare.m.upbound.io/v1alpha1" "zero" "zero.upjet-cloudflare.m.upbound.io/v1alpha1" }}
+{{- $dependencies := list
+  (dict "user" "worker" "ofKind" "TrustAccessApplication" "ofName" $access "byKind" "Script" "byName" $name "apiVersion" $groups.workers)
+  (dict "user" "endpoint" "ofKind" "TrustAccessApplication" "ofName" $access "byKind" "ScriptSubdomain" "byName" $endpoint "apiVersion" $groups.workers)
+  (dict "user" "access-slot" "ofKind" "TrustAccessServiceToken" "ofName" $token "byKind" "TrustAccessApplication" "byName" $access "apiVersion" $groups.zero) }}
+{{- range $link := $dependencies }}
+{{- if hasKey $state.observed $link.user }}
+---
+apiVersion: protection.crossplane.io/v1beta1
+kind: Usage
+metadata:
+  name: {{ printf "%s-protect-%s" $name $link.user }}
+  namespace: {{ $ns }}
+  annotations:
+    {{ setResourceNameAnnotation (printf "protect-%s" $link.user) }}
+  labels: {{ $labels | toJson }}
+spec:
+  replayDeletion: true
+  reason: Keep service-only Access in place until its dependents are removed.
+  of:
+    apiVersion: {{ $groups.zero }}
+    kind: {{ $link.ofKind }}
+    resourceRef: {name: {{ $link.ofName }}}
+  by:
+    apiVersion: {{ $link.apiVersion }}
+    kind: {{ $link.byKind }}
+    resourceRef: {name: {{ $link.byName }}}
+{{- end }}
+{{- end }}
+{{- end }}

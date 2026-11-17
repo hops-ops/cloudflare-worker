@@ -1,0 +1,10 @@
+apiVersion: workloads.hops.ops.com.ai/v1alpha1
+kind: CloudflareWorker
+metadata:
+  name: worker
+  namespace: example
+spec:
+  workerName: example-worker
+  artifact:
+    ref: ghcr.io/example/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  compatibilityDate: "2025-02-14"

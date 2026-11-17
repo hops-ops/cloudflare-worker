@@ -1,0 +1,57 @@
+{{- $xr := getCompositeResource . }}
+{{- $spec := $xr.spec }}
+{{- $name := $xr.metadata.name }}
+{{- $ns := $xr.metadata.namespace }}
+{{- $profile := printf "cloudflare-worker-%s" (dig "platformRef" "name" "default" $spec) }}
+---
+apiVersion: meta.gotemplating.fn.crossplane.io/v1alpha1
+kind: ExtraResources
+requirements:
+  platform:
+    apiVersion: apiextensions.crossplane.io/v1beta1
+    kind: EnvironmentConfig
+    matchName: {{ $profile }}
+{{- $extra := .extraResources | default dict }}
+{{- $platform := dict }}
+{{- range (dig "platform" "items" list $extra) }}
+{{- $platform = .resource.data }}
+{{- end }}
+{{- if and (hasKey $extra "platform") (empty $platform) }}
+{{- fail (printf "EnvironmentConfig %s must have platform settings" $profile) }}
+{{- end }}
+{{- $state := dict "platform" $platform "observed" dict "status" dict }}
+{{- range $key, $entry := (.observed.resources | default dict) }}
+{{- $_ := set $state.observed $key $entry.resource }}
+{{- end }}
+{{- $mode := $spec.exposure | default "none" }}
+{{- $labels := mergeOverwrite (dict "hops.ops.com.ai/managed" "true" "hops.ops.com.ai/cloudflare-worker" ($name | trunc 63 | trimSuffix "-")) ($spec.labels | default dict) }}
+{{- $policies := $spec.managementPolicies | default (list "*") }}
+{{- $network := $spec.privateNetworking | default dict }}
+{{- $origins := list }}
+{{- if $network.enabled }}
+{{- $origins = $network.origins | default list }}
+{{- end }}
+{{- $bindings := deepCopy ($spec.bindings | default list) }}
+{{- $access := printf "%s-access" $name }}
+{{- $token := printf "%s-access-token" $name }}
+{{- $tokenSecret := printf "%s-relay-credentials" $name }}
+{{- $endpoint := printf "%s-endpoint" $name }}
+{{- $worker := get $state.observed "worker" | default dict }}
+{{- $edge := "" }}
+{{- if $platform }}
+{{- if not (regexMatch "^[a-f0-9]{32}$" ($platform.accountId | default "")) }}
+{{- fail "platform accountId must be a Cloudflare account identifier" }}
+{{- end }}
+{{- if or (empty $platform.providerConfigRef) (empty $platform.providerConfigRef.name) (not (has ($platform.providerConfigRef.kind | default "") (list "ProviderConfig" "ClusterProviderConfig"))) }}
+{{- fail "platform providerConfigRef requires a name and a ProviderConfig or ClusterProviderConfig kind" }}
+{{- end }}
+{{- if ne $mode "none" }}
+{{- if not (regexMatch "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$" ($platform.workersDevSubdomain | default "")) }}
+{{- fail "platform workersDevSubdomain must be the account's workers.dev label" }}
+{{- end }}
+{{- $edge = printf "%s.%s.workers.dev" $spec.workerName $platform.workersDevSubdomain }}
+{{- end }}
+{{- if and $network.enabled (or (empty $origins) (not (regexMatch "^[a-fA-F0-9]{8}(-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$" (dig "privateNetworking" "tunnelId" "" $platform)))) }}
+{{- fail "private networking requires at least one origin and the platform's shared Tunnel ID" }}
+{{- end }}
+{{- end }}
