@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 
 NAMESPACE = "cloudflare-worker-e2e"
+CONTEXT = "kind-cloudflare-worker-e2e"
 XR_TYPE = "cloudflareworkers.workloads.hops.ops.com.ai"
 ACCOUNT = os.environ["CLOUDFLARE_TEST_ACCOUNT_ID"]
 TOKEN = os.environ["CLOUDFLARE_TEST_API_TOKEN"]
@@ -43,7 +44,7 @@ def request(url, *, api=False, method="GET"):
 
 
 def k(*args, **kwargs):
-    return subprocess.run(["kubectl", *args], check=True, timeout=370, **kwargs)
+    return subprocess.run(["kubectl", "--context", CONTEXT, *args], check=True, timeout=370, **kwargs)
 
 
 def apply(resource):
@@ -97,11 +98,12 @@ def cleanup():
 
 
 def secret(name, values, secret_type="Opaque"):
-    apply({
+    resource = {
         "apiVersion": "v1", "kind": "Secret",
         "metadata": {"name": name, "namespace": NAMESPACE},
         "type": secret_type, "stringData": values,
-    })
+    }
+    k("create", "-f", "-", input=json.dumps(resource), text=True)
 
 
 def run():
