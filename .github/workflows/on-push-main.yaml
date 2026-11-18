@@ -35,8 +35,8 @@ jobs:
         account-id: ${{ vars.CLOUDFLARE_TEST_ACCOUNT_ID }}
         subdomain: ${{ vars.CLOUDFLARE_TEST_WORKERS_SUBDOMAIN }}
         api-token: ${{ secrets.CLOUDFLARE_TEST_API_TOKEN }}
-        family-provider: ${{ vars.CLOUDFLARE_FAMILY_PROVIDER_PACKAGE }}
-        workers-provider: ${{ needs.e2e-provider.outputs.package }}
+        family-provider: ${{ needs.e2e-provider.outputs.family }}
+        workers-provider: ${{ needs.e2e-provider.outputs.workers }}
 
   version-and-tag:
     needs: [checks, e2e]

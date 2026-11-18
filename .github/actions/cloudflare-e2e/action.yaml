@@ -11,8 +11,8 @@ inputs:
     description: Account-scoped Cloudflare API token
     required: true
   family-provider:
-    description: Optional Cloudflare family provider package
-    required: false
+    description: Digest-pinned Cloudflare family provider package
+    required: true
   workers-provider:
     description: Digest-pinned Cloudflare Workers provider package
     required: true
@@ -52,14 +52,12 @@ runs:
           type:"kubernetes.io/dockerconfigjson",
           stringData:{".dockerconfigjson":({auths:{"ghcr.io":{auth:((env.GITHUB_ACTOR+":"+env.GHCR_TOKEN)|@base64)}}}|tojson)}}' |
           kubectl create -f -
-        if [[ -n "$FAMILY_PROVIDER" ]]; then
-          jq -n --arg package "$FAMILY_PROVIDER" '{apiVersion:"pkg.crossplane.io/v1",kind:"Provider",
-            metadata:{name:"cloudflare-family"},spec:{package:$package}}' | kubectl apply -f -
-          kubectl wait --for=condition=Healthy --timeout=420s provider/cloudflare-family
-        fi
-        jq -n --arg package "$WORKERS_PROVIDER" --arg family "$FAMILY_PROVIDER" \
+        jq -n --arg package "$FAMILY_PROVIDER" '{apiVersion:"pkg.crossplane.io/v1",kind:"Provider",
+          metadata:{name:"cloudflare-family"},spec:{package:$package,packagePullSecrets:[{name:"hops-ghcr"}]}}' | kubectl apply -f -
+        kubectl wait --for=condition=Healthy --timeout=420s provider/cloudflare-family
+        jq -n --arg package "$WORKERS_PROVIDER" \
           '{apiVersion:"pkg.crossplane.io/v1",kind:"Provider",metadata:{name:"cloudflare-workers"},
-            spec:{package:$package,packagePullSecrets:[{name:"hops-ghcr"}],skipDependencyResolution:($family != "")}}' | kubectl apply -f -
+            spec:{package:$package,packagePullSecrets:[{name:"hops-ghcr"}],skipDependencyResolution:true}}' | kubectl apply -f -
         kubectl wait --for=condition=Healthy --timeout=420s provider/cloudflare-workers
         kubectl explain script.spec.artifact --api-version=workers.upjet-cloudflare.m.upbound.io/v1alpha1
     - uses: actions/setup-python@v5
