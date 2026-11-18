@@ -66,6 +66,7 @@ runs:
       with:
         python-version: "3.12"
     - run: pip install PyYAML==6.0.3
+      shell: bash
     - name: Install render and readiness functions
       shell: bash
       run: |
