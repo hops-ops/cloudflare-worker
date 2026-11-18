@@ -32,8 +32,8 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def request(url, *, api=False, method="GET"):
-    headers = {"Authorization": f"Bearer {TOKEN}"} if api else {}
+def api_request(url, *, method="GET"):
+    headers = {"Authorization": f"Bearer {TOKEN}"}
     opener = urllib.request.build_opener(NoRedirect)
     try:
         response = opener.open(urllib.request.Request(url, headers=headers, method=method), timeout=15)
@@ -52,7 +52,7 @@ def apply(resource):
 
 
 def absent():
-    status, body = request(f"{SCRIPTS}/{NAME}/settings", api=True)
+    status, body = api_request(f"{SCRIPTS}/{NAME}/settings")
     if status == 404:
         return True
     if status == 200:
@@ -87,14 +87,22 @@ def cleanup():
     except (RuntimeError, subprocess.SubprocessError, urllib.error.URLError):
         # Recover the exact resource reserved by this run, and report the failed normal lifecycle.
         if not absent():
-            status, _ = request(f"{SCRIPTS}/{NAME}", api=True, method="DELETE")
+            status, _ = api_request(f"{SCRIPTS}/{NAME}", method="DELETE")
             if status not in (200, 202, 204, 404):
                 raise RuntimeError(f"Emergency deletion returned HTTP {status} for {NAME}.")
             wait_for(absent, "emergency cleanup to finish", seconds=40)
         MARKER.unlink()
         raise RuntimeError(f"Normal cleanup failed. Emergency cleanup confirmed {NAME} is absent.")
     MARKER.unlink()
-    print(f"Verified Cloudflare deleted {NAME}.")
+    print(f"Verified {NAME} is absent from Cloudflare.")
+
+
+def serves(url, version):
+    response = subprocess.run(
+        ["curl", "--silent", "--show-error", "--max-time", "15", "--write-out", "\n%{http_code}", url],
+        capture_output=True, timeout=20,
+    )
+    return response.returncode == 0 and response.stdout == f"{NAME}:{version}\n200".encode()
 
 
 def secret(name, values, secret_type="Opaque"):
@@ -176,7 +184,7 @@ def run():
               f"--for=jsonpath={{.status.resolvedArtifactDigest}}={digest}")
             k("-n", NAMESPACE, "wait", XR_TYPE, NAME, "--timeout=300s",
               f"--for=jsonpath={{.status.url}}={url.rstrip('/')}")
-            wait_for(lambda: request(url) == (200, f"{NAME}:{version}".encode()),
+            wait_for(lambda: serves(url, version),
                      f"the real Worker to serve {version}")
             print(f"Verified Cloudflare served {NAME}:{version}.", flush=True)
     except Exception:
