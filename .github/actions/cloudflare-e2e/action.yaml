@@ -90,7 +90,12 @@ runs:
           function/function-go-templating function/crossplane-contrib-function-auto-ready
         kubectl apply -f apis/cloudflareworkers/definition.yaml
         python3 tests/e2e/composition.py | kubectl apply -f -
-        kubectl wait --for=condition=Established --timeout=90s crd/cloudflareworkers.workloads.hops.ops.com.ai
+        crd=crd/cloudflareworkers.workloads.hops.ops.com.ai
+        if ! kubectl wait --for=create --timeout=90s "$crd"; then
+          kubectl describe xrd/cloudflareworkers.workloads.hops.ops.com.ai
+          exit 1
+        fi
+        kubectl wait --for=condition=Established --timeout=90s "$crd"
     - uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6
       with:
         version: 1.3.0
