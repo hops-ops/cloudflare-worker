@@ -1,0 +1,47 @@
+{{- if and $platform (eq $mode "private") }}
+---
+apiVersion: zero.upjet-cloudflare.m.upbound.io/v1alpha1
+kind: TrustAccessServiceToken
+metadata:
+  name: {{ $token }}
+  namespace: {{ $ns | quote }}
+  annotations:
+    {{ setResourceNameAnnotation "access-token" }}
+  labels: {{ $labels | toJson }}
+spec:
+  managementPolicies: {{ $policies | toJson }}
+  providerConfigRef: {{ $platform.providerConfigRef | toJson }}
+  forProvider:
+    accountId: {{ $platform.accountId | quote }}
+    name: {{ $spec.workerName | quote }}
+    duration: {{ dig "relay" "serviceTokenDuration" "8760h" $platform | quote }}
+  writeConnectionSecretToRef:
+    name: {{ $tokenSecret }}
+---
+apiVersion: zero.upjet-cloudflare.m.upbound.io/v1alpha1
+kind: TrustAccessApplication
+metadata:
+  name: {{ $access }}
+  namespace: {{ $ns | quote }}
+  annotations:
+    {{ setResourceNameAnnotation "access-slot" }}
+  labels: {{ $labels | toJson }}
+spec:
+  managementPolicies: {{ $policies | toJson }}
+  providerConfigRef: {{ $platform.providerConfigRef | toJson }}
+  forProvider:
+    accountId: {{ $platform.accountId | quote }}
+    name: {{ $spec.workerName | quote }}
+    type: self_hosted
+    domain: {{ $edge }}
+    appLauncherVisible: false
+    policies:
+    - name: Private WebService relay
+      decision: non_identity
+      precedence: 1
+      include:
+      - serviceToken:
+          tokenIdRef:
+            name: {{ $token }}
+            policy: {resolve: Always}
+{{- end }}

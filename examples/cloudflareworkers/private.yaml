@@ -1,0 +1,19 @@
+apiVersion: workloads.hops.ops.com.ai/v1alpha1
+kind: CloudflareWorker
+metadata:
+  name: gateway
+  namespace: example
+spec:
+  workerName: example-private-worker
+  artifact:
+    ref: ghcr.io/example/worker@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    pullSecretRef:
+      name: worker-registry
+  compatibilityDate: "2025-02-14"
+  exposure: private
+  privateNetworking:
+    enabled: true
+    origins:
+    - binding: API
+      hostname: api.staging.svc.cluster.local
+      port: 8080

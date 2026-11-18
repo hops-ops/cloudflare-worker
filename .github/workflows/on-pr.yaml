@@ -1,0 +1,58 @@
+name: on-pr
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, reopened, synchronize, labeled]
+
+permissions: {}
+
+jobs:
+  checks:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/check.yaml
+
+  e2e-provider:
+    if: github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'cloudflare-e2e')
+    needs: checks
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/cloudflare-e2e-provider.yaml
+
+  e2e:
+    needs: e2e-provider
+    runs-on: ubuntu-24.04
+    environment: cloudflare-e2e
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - uses: ./.github/actions/cloudflare-e2e
+      with:
+        account-id: ${{ vars.CLOUDFLARE_TEST_ACCOUNT_ID }}
+        subdomain: ${{ vars.CLOUDFLARE_TEST_WORKERS_SUBDOMAIN }}
+        api-token: ${{ secrets.CLOUDFLARE_TEST_API_TOKEN }}
+        family-provider: ${{ needs.e2e-provider.outputs.family }}
+        workers-provider: ${{ needs.e2e-provider.outputs.workers }}
+
+  publish:
+    if: >-
+      ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository
+      && needs.checks.result == 'success'
+      && (needs.e2e.result == 'success' || (
+        needs.e2e.result == 'skipped' && !contains(github.event.pull_request.labels.*.name, 'cloudflare-e2e')
+      )) }}
+    needs: [checks, e2e]
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+      issues: write
+    uses: unbounded-tech/workflows-crossplane/.github/workflows/publish.yaml@v2.20.0
+    with:
+      tag: pr-${{ github.event.pull_request.number }}-${{ github.sha }}

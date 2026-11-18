@@ -1,0 +1,151 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: cloudflareworkers.workloads.hops.ops.com.ai
+spec:
+  group: workloads.hops.ops.com.ai
+  names:
+    kind: CloudflareWorker
+    plural: cloudflareworkers
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          metadata:
+            type: object
+            properties:
+              name:
+                type: string
+                maxLength: 63
+                pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+          spec:
+            type: object
+            required: [workerName, artifact, compatibilityDate]
+            properties:
+              workerName:
+                type: string
+                description: Cloudflare account-wide Worker name.
+                pattern: '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+                x-kubernetes-validations:
+                - rule: self == oldSelf
+                  message: The Worker name is immutable.
+              platformRef:
+                type: object
+                default: {name: default}
+                required: [name]
+                properties:
+                  name:
+                    type: string
+                    description: Selects the cloudflare-worker-<name> EnvironmentConfig.
+                    pattern: '^[a-z0-9]([-a-z0-9]{0,38}[a-z0-9])?$'
+                x-kubernetes-validations:
+                - rule: self == oldSelf
+                  message: The platform profile is immutable.
+              artifact:
+                type: object
+                required: [ref]
+                properties:
+                  ref:
+                    type: string
+                    description: OCI bundle reference pinned by SHA-256 digest.
+                    maxLength: 2048
+                    pattern: '^[a-zA-Z0-9][a-zA-Z0-9._:/-]+@sha256:[0-9a-f]{64}$'
+                  pullSecretRef:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                        maxLength: 253
+              exposure:
+                type: string
+                description: Select no workers.dev endpoint, a public endpoint, or a private WebService relay.
+                enum: [none, public, private]
+                default: none
+                x-kubernetes-validations:
+                - rule: self == oldSelf
+                  message: Exposure is immutable. Deploy a separate Worker to change exposure.
+              compatibilityDate:
+                type: string
+                pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+              compatibilityFlags:
+                type: array
+                items: {type: string}
+              labels:
+                type: object
+                additionalProperties: {type: string}
+              managementPolicies:
+                type: array
+                minItems: 1
+                default: ['*']
+                items:
+                  type: string
+                  enum: ['*', Observe, Create, Update, LateInitialize, Delete]
+              bindings:
+                type: array
+                maxItems: 64
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys: [name]
+                items:
+                  type: object
+                  required: [name, type]
+                  x-kubernetes-preserve-unknown-fields: true
+                  properties:
+                    name:
+                      type: string
+                      maxLength: 64
+                      pattern: '^[A-Za-z_][A-Za-z0-9_]{0,63}$'
+                    type: {type: string}
+                  x-kubernetes-validations:
+                  - rule: self.type != 'vpc_service'
+                    message: Configure private origin bindings with privateNetworking.origins.
+              privateNetworking:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                    default: false
+                  origins:
+                    type: array
+                    maxItems: 32
+                    x-kubernetes-list-type: map
+                    x-kubernetes-list-map-keys: [binding]
+                    items:
+                      type: object
+                      required: [binding, hostname]
+                      properties:
+                        binding:
+                          type: string
+                          maxLength: 64
+                          pattern: '^[A-Za-z_][A-Za-z0-9_]{0,63}$'
+                        hostname:
+                          type: string
+                          maxLength: 253
+                          pattern: '^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$'
+                        port:
+                          type: integer
+                          minimum: 1
+                          maximum: 65535
+                          default: 80
+                x-kubernetes-validations:
+                - rule: '!has(self.enabled) || !self.enabled || (has(self.origins) && self.origins.size() > 0)'
+                  message: Enabling private networking requires at least one origin.
+            x-kubernetes-validations:
+            - rule: '!has(self.privateNetworking) || !has(self.privateNetworking.origins) || !has(self.bindings) || self.privateNetworking.origins.all(o, self.bindings.all(b, b.name != o.binding))'
+              message: A private origin and a Worker binding cannot share a binding name.
+          status:
+            type: object
+            properties:
+              url:
+                type: string
+                description: Observed public or private relay URL.
+              resolvedArtifactDigest:
+                type: string
+                description: Digest fetched by the Worker controller.

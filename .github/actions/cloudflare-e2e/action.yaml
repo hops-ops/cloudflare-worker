@@ -1,0 +1,123 @@
+name: Cloudflare Worker lifecycle
+description: Exercise the Worker lifecycle against a dedicated Cloudflare test account in Kind.
+inputs:
+  account-id:
+    description: Cloudflare test account ID
+    required: true
+  subdomain:
+    description: Account workers.dev label
+    required: true
+  api-token:
+    description: Account-scoped Cloudflare API token
+    required: true
+  family-provider:
+    description: Digest-pinned Cloudflare family provider package
+    required: true
+  workers-provider:
+    description: Digest-pinned Cloudflare Workers provider package
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Check test configuration
+      env:
+        ACCOUNT_ID: ${{ inputs.account-id }}
+        SUBDOMAIN: ${{ inputs.subdomain }}
+        TOKEN: ${{ inputs.api-token }}
+      shell: bash
+      run: |
+        if [[ -z "$ACCOUNT_ID" || -z "$SUBDOMAIN" || -z "$TOKEN" ]]; then
+          echo "::error::Configure the cloudflare-e2e environment as documented in the README."
+          exit 1
+        fi
+    - uses: helm/kind-action@v1.12.0
+      with:
+        cluster_name: cloudflare-worker-e2e
+    - uses: azure/setup-helm@v4
+      with:
+        version: v3.17.4
+    - name: Install Crossplane and Cloudflare providers
+      env:
+        WORKERS_PROVIDER: ${{ inputs.workers-provider }}
+        GHCR_TOKEN: ${{ github.token }}
+        FAMILY_PROVIDER: ${{ inputs.family-provider }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        helm repo add crossplane https://charts.crossplane.io/stable
+        helm upgrade --install crossplane crossplane/crossplane --version 2.4.3 \
+          --namespace crossplane-system --create-namespace --wait --timeout 5m
+        kubectl wait --for=condition=Established --timeout=60s crd/providers.pkg.crossplane.io
+        jq -n '{apiVersion:"v1",kind:"Secret",metadata:{name:"hops-ghcr",namespace:"crossplane-system"},
+          type:"kubernetes.io/dockerconfigjson",
+          stringData:{".dockerconfigjson":({auths:{"ghcr.io":{auth:((env.GITHUB_ACTOR+":"+env.GHCR_TOKEN)|@base64)}}}|tojson)}}' |
+          kubectl create -f -
+        jq -n --arg package "$FAMILY_PROVIDER" '{apiVersion:"pkg.crossplane.io/v1",kind:"Provider",
+          metadata:{name:"cloudflare-family"},spec:{package:$package,packagePullSecrets:[{name:"hops-ghcr"}]}}' | kubectl apply -f -
+        kubectl wait --for=condition=Healthy --timeout=420s provider/cloudflare-family
+        jq -n --arg package "$WORKERS_PROVIDER" \
+          '{apiVersion:"pkg.crossplane.io/v1",kind:"Provider",metadata:{name:"cloudflare-workers"},
+            spec:{package:$package,packagePullSecrets:[{name:"hops-ghcr"}],skipDependencyResolution:true}}' | kubectl apply -f -
+        kubectl wait --for=condition=Healthy --timeout=420s provider/cloudflare-workers
+        kubectl explain script.spec.artifact --api-version=workers.upjet-cloudflare.m.upbound.io/v1alpha1
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - run: pip install PyYAML==6.0.3
+      shell: bash
+    - name: Install render and readiness functions
+      shell: bash
+      run: |
+        set -euo pipefail
+        kubectl apply -f - <<'YAML'
+        apiVersion: pkg.crossplane.io/v1
+        kind: Function
+        metadata:
+          name: function-go-templating
+        spec:
+          package: xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.11.4
+        ---
+        apiVersion: pkg.crossplane.io/v1
+        kind: Function
+        metadata:
+          name: crossplane-contrib-function-auto-ready
+        spec:
+          package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.6.4
+        YAML
+        kubectl wait --for=condition=Healthy --timeout=300s \
+          function/function-go-templating function/crossplane-contrib-function-auto-ready
+        kubectl apply -f apis/cloudflareworkers/definition.yaml
+        python3 tests/e2e/composition.py | kubectl apply -f -
+        crd=crd/cloudflareworkers.workloads.hops.ops.com.ai
+        if ! kubectl wait --for=create --timeout=90s "$crd"; then
+          kubectl describe xrd/cloudflareworkers.workloads.hops.ops.com.ai
+          exit 1
+        fi
+        kubectl wait --for=condition=Established --timeout=90s "$crd"
+    - uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6
+      with:
+        version: 1.3.0
+    - name: Publish synthetic Worker bundles
+      id: bundle
+      env:
+        GHCR_TOKEN: ${{ github.token }}
+      shell: bash
+      run: tests/e2e/publish-bundles.sh
+    - name: Deploy, update, and delete the Cloudflare Worker
+      env:
+        CLOUDFLARE_TEST_ACCOUNT_ID: ${{ inputs.account-id }}
+        CLOUDFLARE_TEST_WORKERS_SUBDOMAIN: ${{ inputs.subdomain }}
+        CLOUDFLARE_TEST_API_TOKEN: ${{ inputs.api-token }}
+        GHCR_TOKEN: ${{ github.token }}
+        BUNDLE_V1: ${{ steps.bundle.outputs.v1 }}
+        BUNDLE_V2: ${{ steps.bundle.outputs.v2 }}
+      shell: bash
+      run: python3 tests/e2e/worker-lifecycle.py
+    - name: Recover Cloudflare cleanup if the lifecycle was interrupted
+      if: always() && steps.bundle.outcome == 'success'
+      env:
+        CLOUDFLARE_TEST_ACCOUNT_ID: ${{ inputs.account-id }}
+        CLOUDFLARE_TEST_WORKERS_SUBDOMAIN: ${{ inputs.subdomain }}
+        CLOUDFLARE_TEST_API_TOKEN: ${{ inputs.api-token }}
+      shell: bash
+      run: python3 tests/e2e/worker-lifecycle.py --cleanup

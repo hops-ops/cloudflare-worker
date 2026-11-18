@@ -1,0 +1,29 @@
+{{- if $platform }}
+{{- range $origin := $origins }}
+{{- $key := printf "origin-%s" (trunc 12 (sha256sum $origin.binding)) }}
+{{- $resource := printf "%s-%s" $name $key }}
+{{- $directoryName := printf "%s-%s" ($spec.workerName | trunc 50 | trimSuffix "-") (trunc 12 (sha256sum (printf "%s/%s" $spec.workerName $origin.binding))) }}
+{{- $bindings = append $bindings (dict "name" $origin.binding "type" "vpc_service" "serviceIdRef" (dict "name" $resource "policy" (dict "resolve" "Always"))) }}
+---
+apiVersion: connectivity.upjet-cloudflare.m.upbound.io/v1alpha1
+kind: DirectoryService
+metadata:
+  name: {{ $resource }}
+  namespace: {{ $ns | quote }}
+  annotations:
+    {{ setResourceNameAnnotation $key }}
+  labels: {{ $labels | toJson }}
+spec:
+  managementPolicies: {{ $policies | toJson }}
+  providerConfigRef: {{ $platform.providerConfigRef | toJson }}
+  forProvider:
+    accountId: {{ $platform.accountId | quote }}
+    name: {{ $directoryName }}
+    type: http
+    httpPort: {{ $origin.port | default 80 }}
+    host:
+      hostname: {{ $origin.hostname | quote }}
+      resolverNetwork:
+        tunnelId: {{ $platform.privateNetworking.tunnelId | quote }}
+{{- end }}
+{{- end }}
