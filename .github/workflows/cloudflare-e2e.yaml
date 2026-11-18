@@ -8,7 +8,54 @@ permissions:
   packages: write
 
 jobs:
+  build-provider:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # Replace this public source candidate with a release once OCI bundles ship.
+      PROVIDER_REVISION: 9830c6d4b061ec4822135dba1b28a64399684949
+    outputs:
+      package: ${{ steps.package.outputs.ref }}
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        repository: wildbitca/provider-upjet-cloudflare
+        ref: ${{ env.PROVIDER_REVISION }}
+        path: provider
+        submodules: true
+        persist-credentials: false
+    - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+      with:
+        go-version: '1.26.8'
+        cache-dependency-path: provider/go.sum
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+    - name: Publish the Workers test provider to Hops GHCR
+      id: package
+      working-directory: provider
+      env:
+        GHCR_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        repository="ghcr.io/${GITHUB_REPOSITORY,,}-e2e-provider"
+        version="v1.0.4-preview.$PROVIDER_REVISION"
+        target="$repository:$version"
+        printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+        if ! digest="$(docker buildx imagetools inspect "$target" --format '{{ .Manifest.Digest }}' 2>/dev/null)"; then
+          curl --fail --silent --show-error --location --retry 3 \
+            https://releases.crossplane.io/stable/v2.1.3/bin/linux_amd64/crank -o "$RUNNER_TEMP/crossplane"
+          chmod +x "$RUNNER_TEMP/crossplane"
+          make vendor vendor.check
+          make build.family FAMILY_SUBPACKAGES=workers SUBPACKAGES=workers PLATFORM=linux_amd64 \
+            VERSION="$version" CROSSPLANE_CLI="$RUNNER_TEMP/crossplane"
+          "$RUNNER_TEMP/crossplane" xpkg push \
+            -f "_output/xpkg/linux_amd64/provider-cloudflare-workers-$version.xpkg" "$target"
+          digest="$(docker buildx imagetools inspect "$target" --format '{{ .Manifest.Digest }}')"
+        fi
+        [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+        printf 'ref=%s@%s\n' "$repository" "$digest" >> "$GITHUB_OUTPUT"
+
   worker:
+    needs: build-provider
     runs-on: ubuntu-24.04
     environment: cloudflare-e2e
     timeout-minutes: 35
@@ -18,12 +65,11 @@ jobs:
         persist-credentials: false
     - name: Check test configuration
       env:
-        WORKERS_PROVIDER: ${{ vars.CLOUDFLARE_WORKERS_PROVIDER_PACKAGE }}
         ACCOUNT_ID: ${{ vars.CLOUDFLARE_TEST_ACCOUNT_ID }}
         SUBDOMAIN: ${{ vars.CLOUDFLARE_TEST_WORKERS_SUBDOMAIN }}
         TOKEN: ${{ secrets.CLOUDFLARE_TEST_API_TOKEN }}
       run: |
-        if [[ -z "$WORKERS_PROVIDER" || -z "$ACCOUNT_ID" || -z "$SUBDOMAIN" || -z "$TOKEN" ]]; then
+        if [[ -z "$ACCOUNT_ID" || -z "$SUBDOMAIN" || -z "$TOKEN" ]]; then
           echo "::error::Configure the cloudflare-e2e environment as documented in the README."
           exit 1
         fi
@@ -35,7 +81,8 @@ jobs:
         version: v3.17.4
     - name: Install Crossplane and Cloudflare providers
       env:
-        WORKERS_PROVIDER: ${{ vars.CLOUDFLARE_WORKERS_PROVIDER_PACKAGE }}
+        WORKERS_PROVIDER: ${{ needs.build-provider.outputs.package }}
+        GHCR_TOKEN: ${{ github.token }}
         FAMILY_PROVIDER: ${{ vars.CLOUDFLARE_FAMILY_PROVIDER_PACKAGE }}
       run: |
         set -euo pipefail
@@ -43,6 +90,10 @@ jobs:
         helm upgrade --install crossplane crossplane/crossplane --version 2.5.0 \
           --namespace crossplane-system --create-namespace --wait --timeout 5m
         kubectl wait --for=condition=Established --timeout=60s crd/providers.pkg.crossplane.io
+        jq -n '{apiVersion:"v1",kind:"Secret",metadata:{name:"hops-ghcr",namespace:"crossplane-system"},
+          type:"kubernetes.io/dockerconfigjson",
+          stringData:{".dockerconfigjson":({auths:{"ghcr.io":{auth:((env.GITHUB_ACTOR+":"+env.GHCR_TOKEN)|@base64)}}}|tojson)}}' |
+          kubectl create -f -
         if [[ -n "$FAMILY_PROVIDER" ]]; then
           jq -n --arg package "$FAMILY_PROVIDER" '{apiVersion:"pkg.crossplane.io/v1",kind:"Provider",
             metadata:{name:"cloudflare-family"},spec:{package:$package}}' | kubectl apply -f -
@@ -50,7 +101,7 @@ jobs:
         fi
         jq -n --arg package "$WORKERS_PROVIDER" --arg family "$FAMILY_PROVIDER" \
           '{apiVersion:"pkg.crossplane.io/v1",kind:"Provider",metadata:{name:"cloudflare-workers"},
-            spec:{package:$package,skipDependencyResolution:($family != "")}}' | kubectl apply -f -
+            spec:{package:$package,packagePullSecrets:[{name:"hops-ghcr"}],skipDependencyResolution:($family != "")}}' | kubectl apply -f -
         kubectl wait --for=condition=Healthy --timeout=420s provider/cloudflare-workers
         kubectl explain script.spec.artifact --api-version=workers.upjet-cloudflare.m.upbound.io/v1alpha1
     - uses: actions/setup-python@v5

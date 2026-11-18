@@ -100,15 +100,19 @@ Configure the repository's `cloudflare-e2e` GitHub Actions environment:
 | `CLOUDFLARE_TEST_API_TOKEN` | Secret | API token restricted to a dedicated test Cloudflare account with a Workers write permission |
 | `CLOUDFLARE_TEST_ACCOUNT_ID` | Variable | That test account's ID |
 | `CLOUDFLARE_TEST_WORKERS_SUBDOMAIN` | Variable | The account label in `<label>.workers.dev`, enabled in Cloudflare |
-| `CLOUDFLARE_WORKERS_PROVIDER_PACKAGE` | Variable | Pullable Crossplane provider package that serves namespaced `Script.spec.artifact` |
 | `CLOUDFLARE_FAMILY_PROVIDER_PACKAGE` | Variable, optional | Explicit compatible family package if the Workers package needs a separately installed family |
 
 Grant the token permission to create, update, read, and delete Worker scripts
 and manage their `workers.dev` endpoint. The workflow uses the repository's
 automatic Actions token to publish and pull its synthetic OCI bundles.
 
-The test boots a fresh Kind cluster, installs Crossplane and the compatible
-provider, and reconciles the source composition with its go-templating renderer.
+The workflow builds the OCI-capable Workers provider from a pinned public
+upstream commit and publishes the test package in the Hops repository's GHCR
+namespace. Kind pulls it with the repository's Actions token. Use a released
+provider after upstream ships OCI bundle support.
+
+The test boots a fresh Kind cluster, installs Crossplane and the provider, and
+reconciles the source composition with its go-templating renderer.
 It publishes two versions of a synthetic response Worker under a run-specific
 name, checks the live Cloudflare response before and after updating the digest,
 and confirms Cloudflare deletion. The workflow tests the public Worker
