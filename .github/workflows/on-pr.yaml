@@ -12,13 +12,33 @@ jobs:
       contents: read
     uses: ./.github/workflows/check.yaml
 
-  e2e:
+  e2e-provider:
     if: github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.pull_request.labels.*.name, 'cloudflare-e2e')
     needs: checks
     permissions:
       contents: read
       packages: write
-    uses: ./.github/workflows/cloudflare-e2e.yaml
+    uses: ./.github/workflows/cloudflare-e2e-provider.yaml
+
+  e2e:
+    needs: e2e-provider
+    runs-on: ubuntu-24.04
+    environment: cloudflare-e2e
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        persist-credentials: false
+    - uses: ./.github/actions/cloudflare-e2e
+      with:
+        account-id: ${{ vars.CLOUDFLARE_TEST_ACCOUNT_ID }}
+        subdomain: ${{ vars.CLOUDFLARE_TEST_WORKERS_SUBDOMAIN }}
+        api-token: ${{ secrets.CLOUDFLARE_TEST_API_TOKEN }}
+        family-provider: ${{ vars.CLOUDFLARE_FAMILY_PROVIDER_PACKAGE }}
+        workers-provider: ${{ needs.e2e-provider.outputs.package }}
 
   publish:
     if: >-
