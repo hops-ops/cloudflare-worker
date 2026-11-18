@@ -106,6 +106,32 @@ def secret(name, values, secret_type="Opaque"):
     k("create", "-f", "-", input=json.dumps(resource), text=True)
 
 
+
+def diagnostics():
+    resources = (
+        (XR_TYPE, NAME),
+        ("scripts.workers.upjet-cloudflare.m.upbound.io", NAME),
+        ("scriptsubdomains.workers.upjet-cloudflare.m.upbound.io", NAME + "-endpoint"),
+    )
+    for kind, name in resources:
+        output = k("-n", NAMESPACE, "get", kind, name, "--ignore-not-found", "-o", "json",
+                   capture_output=True, text=True).stdout
+        if not output:
+            print(f"{kind}/{name} was never created.", flush=True)
+            continue
+        resource = json.loads(output)
+        status = resource.get("status", {})
+        for condition in status.get("conditions", []):
+            summary = " ".join(str(condition.get(key, "")) for key in ("type", "status", "reason", "message"))
+            for credential in (TOKEN, os.environ.get("GHCR_TOKEN")):
+                if credential:
+                    summary = summary.replace(credential, "[redacted]")
+            print(f"{kind}/{name}: {summary[:1500]}", flush=True)
+        enabled = status.get("atProvider", {}).get("enabled")
+        if enabled is not None:
+            print(f"{kind}/{name}: observed enabled={enabled}", flush=True)
+
+
 def run():
     if not absent():
         raise RuntimeError("The unique test Worker name already exists.")
@@ -148,9 +174,17 @@ def run():
             apply(xr)
             k("-n", NAMESPACE, "wait", XR_TYPE, NAME, "--timeout=300s",
               f"--for=jsonpath={{.status.resolvedArtifactDigest}}={digest}")
+            k("-n", NAMESPACE, "wait", XR_TYPE, NAME, "--timeout=300s",
+              f"--for=jsonpath={{.status.url}}={url.rstrip('/')}")
             wait_for(lambda: request(url) == (200, f"{NAME}:{version}".encode()),
                      f"the real Worker to serve {version}")
-            print(f"Verified Cloudflare served {NAME}:{version}.")
+            print(f"Verified Cloudflare served {NAME}:{version}.", flush=True)
+    except Exception:
+        try:
+            diagnostics()
+        except (subprocess.SubprocessError, ValueError):
+            print("Could not read Kubernetes reconciliation status.", flush=True)
+        raise
     finally:
         cleanup()
 
