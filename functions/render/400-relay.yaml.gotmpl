@@ -10,8 +10,8 @@
 apiVersion: workloads.hops.ops.com.ai/v1alpha1
 kind: WebService
 metadata:
-  name: {{ $name }}
-  namespace: {{ $ns }}
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
   annotations:
     {{ setResourceNameAnnotation "relay" }}
   labels: {{ $labels | toJson }}

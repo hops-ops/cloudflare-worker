@@ -50,7 +50,7 @@ def render(xr, observed_resources=(), profile=None):
             path = folder / "observed.yaml"
             path.write_text(yaml.safe_dump_all(observed_resources))
             args.append(f"--observed-resources={path}")
-        output = subprocess.check_output(args, cwd=ROOT, text=True)
+        output = subprocess.check_output(args, cwd=ROOT, text=True, stderr=subprocess.PIPE)
         resources = [doc for doc in yaml.safe_load_all(output) if doc]
         schemas = os.environ.get("CLOUDFLARE_WORKER_SCHEMAS")
         if schemas:
@@ -78,18 +78,25 @@ class WorkerRender(unittest.TestCase):
 
     def test_public_is_explicit_and_needs_no_access_or_network_stack(self):
         xr = fixture("public")
+        xr["metadata"].update(name="123", namespace="true")
+        xr["spec"]["workerName"] = "null"
         worker_name = xr["spec"]["workerName"]
-        script = observed(xr, "worker", WORKER_API, "Script", "public-worker", worker_name)
-        endpoint = observed(xr, "endpoint", WORKER_API, "ScriptSubdomain", "public-worker-endpoint", worker_name,
+        script = observed(xr, "worker", WORKER_API, "Script", "123", worker_name)
+        endpoint = observed(xr, "endpoint", WORKER_API, "ScriptSubdomain", "123-endpoint", worker_name,
                             atProvider={"enabled": True})
         state, resources = render(xr, [script, endpoint])
         self.assertEqual(state["status"]["url"], f"https://{worker_name}.example.workers.dev")
         self.assertEqual(set(resources), {"worker", "endpoint"})
+        self.assertEqual(resources["worker"]["metadata"]["name"], "123")
+        for resource in resources.values():
+            self.assertEqual(resource["metadata"]["namespace"], "true")
+            self.assertEqual(resource["spec"]["forProvider"]["scriptName"], worker_name)
         self.assertTrue(resources["endpoint"]["spec"]["forProvider"]["enabled"])
         self.assertFalse(resources["endpoint"]["spec"]["forProvider"]["previewsEnabled"])
 
     def test_private_access_gates_the_worker_and_relay_uses_only_its_connection_secret(self):
         xr = fixture("private")
+        xr["spec"]["workerName"] = "true"
         worker_name = xr["spec"]["workerName"]
         fixtures = [
             observed(xr, "worker", WORKER_API, "Script", "gateway", worker_name),
@@ -105,6 +112,8 @@ class WorkerRender(unittest.TestCase):
         self.assertEqual(endpoint["accessApplicationRef"], worker["accessApplicationRef"])
         self.assertFalse(endpoint["previewsEnabled"])
         access = resources["access-slot"]["spec"]["forProvider"]
+        self.assertEqual(access["name"], worker_name)
+        self.assertEqual(resources["access-token"]["spec"]["forProvider"]["name"], worker_name)
         self.assertEqual(access["domain"], f"{worker_name}.example.workers.dev")
         policies = access["policies"]
         self.assertEqual([policy["decision"] for policy in policies], ["non_identity"])
@@ -136,6 +145,25 @@ class WorkerRender(unittest.TestCase):
         self.assertNotIn("bindings", disabled["worker"]["spec"]["forProvider"])
         self.assertFalse(any(r["kind"] == "DirectoryService" for r in disabled.values()))
         self.assertEqual(disabled["relay"], resources["relay"])
+
+    def test_private_requires_platform_settings(self):
+        xr = fixture("private")
+        base = yaml.safe_load((ROOT / "examples/platform.yaml").read_text())
+        missing = copy.deepcopy(base)
+        missing["metadata"]["name"] = "cloudflare-worker-other"
+        no_tunnel = copy.deepcopy(base)
+        del no_tunnel["data"]["privateNetworking"]
+        no_relay = copy.deepcopy(base)
+        del no_relay["data"]["relay"]
+
+        for profile, message in (
+            (missing, "EnvironmentConfig cloudflare-worker-default was not found or has no platform settings"),
+            (no_tunnel, "private networking requires at least one origin and the platform's shared Tunnel ID"),
+            (no_relay, "private exposure requires the platform relay.image"),
+        ):
+            with self.subTest(message=message), self.assertRaises(subprocess.CalledProcessError) as error:
+                render(xr, profile=profile)
+            self.assertIn(message, error.exception.stderr)
 
 
 if __name__ == "__main__":

@@ -3,8 +3,8 @@
 apiVersion: workers.upjet-cloudflare.m.upbound.io/v1alpha1
 kind: Script
 metadata:
-  name: {{ $name }}
-  namespace: {{ $ns }}
+  name: {{ $name | quote }}
+  namespace: {{ $ns | quote }}
   annotations:
     {{ setResourceNameAnnotation "worker" }}
   labels: {{ $labels | toJson }}
@@ -19,7 +19,7 @@ spec:
       name: {{ $access }}
       policy: {resolve: Always}
     {{- else }}
-    scriptName: {{ $spec.workerName }}
+    scriptName: {{ $spec.workerName | quote }}
     {{- end }}
     compatibilityDate: {{ $spec.compatibilityDate | quote }}
     {{- if $spec.compatibilityFlags }}
@@ -34,7 +34,7 @@ apiVersion: workers.upjet-cloudflare.m.upbound.io/v1alpha1
 kind: ScriptSubdomain
 metadata:
   name: {{ $endpoint }}
-  namespace: {{ $ns }}
+  namespace: {{ $ns | quote }}
   annotations:
     {{ setResourceNameAnnotation "endpoint" }}
   labels: {{ $labels | toJson }}
@@ -48,7 +48,7 @@ spec:
       name: {{ $access }}
       policy: {resolve: Always}
     {{- else }}
-    scriptName: {{ $spec.workerName }}
+    scriptName: {{ $spec.workerName | quote }}
     {{- end }}
     enabled: {{ ne $mode "none" }}
     previewsEnabled: false

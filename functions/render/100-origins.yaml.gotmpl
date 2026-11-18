@@ -9,7 +9,7 @@ apiVersion: connectivity.upjet-cloudflare.m.upbound.io/v1alpha1
 kind: DirectoryService
 metadata:
   name: {{ $resource }}
-  namespace: {{ $ns }}
+  namespace: {{ $ns | quote }}
   annotations:
     {{ setResourceNameAnnotation $key }}
   labels: {{ $labels | toJson }}

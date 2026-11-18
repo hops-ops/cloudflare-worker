@@ -17,7 +17,7 @@ requirements:
 {{- $platform = .resource.data }}
 {{- end }}
 {{- if and (hasKey $extra "platform") (empty $platform) }}
-{{- fail (printf "EnvironmentConfig %s must have platform settings" $profile) }}
+{{- fail (printf "EnvironmentConfig %s was not found or has no platform settings" $profile) }}
 {{- end }}
 {{- $state := dict "platform" $platform "observed" dict "status" dict }}
 {{- range $key, $entry := (.observed.resources | default dict) }}
