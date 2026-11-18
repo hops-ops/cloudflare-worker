@@ -45,7 +45,7 @@ runs:
       run: |
         set -euo pipefail
         helm repo add crossplane https://charts.crossplane.io/stable
-        helm upgrade --install crossplane crossplane/crossplane --version 2.5.0 \
+        helm upgrade --install crossplane crossplane/crossplane --version 2.4.3 \
           --namespace crossplane-system --create-namespace --wait --timeout 5m
         kubectl wait --for=condition=Established --timeout=60s crd/providers.pkg.crossplane.io
         jq -n '{apiVersion:"v1",kind:"Secret",metadata:{name:"hops-ghcr",namespace:"crossplane-system"},
